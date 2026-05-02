@@ -1,0 +1,4 @@
+.env
+state.json
+state.lock
+node_modules/

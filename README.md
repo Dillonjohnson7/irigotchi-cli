@@ -89,6 +89,12 @@ Normal usage will never hit these limits.
 | `settings.json` | `~/.claude/` | Hook registration |
 | `CLAUDE.md` | `~/.claude/` | Display instruction |
 
+## Privacy
+
+When using Groq mode (default), your prompt text is sent to the [Groq API](https://groq.com) for niceness scoring. Groq's API does not store your data per their [privacy policy](https://groq.com/privacy-policy/). If you prefer fully offline scoring, simply don't add a Groq API key — IRI will use the built-in keyword scorer instead.
+
+The install script modifies `~/.claude/settings.json` (adds a hook) and `~/.claude/CLAUDE.md` (adds a display instruction). Run `./uninstall.sh` to cleanly revert both.
+
 ## License
 
 MIT
