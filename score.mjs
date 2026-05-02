@@ -29,14 +29,16 @@ function keywordScore(text) {
   return Math.max(0, Math.min(10, Math.round(5 + ratio * 5)));
 }
 
-// Read API key from ~/.claude/irigotchi/.env
-function getApiKey() {
-  if (process.env.GROQ_API_KEY) return process.env.GROQ_API_KEY;
+// Read API keys from ~/.claude/irigotchi/.env
+function getKeys() {
+  let groq = process.env.GROQ_API_KEY || null;
+  let openrouter = process.env.OPENROUTER_API_KEY || null;
   try {
     const env = readFileSync(ENV_FILE, 'utf-8');
-    const match = env.match(/^GROQ_API_KEY=(.+)$/m);
-    return match?.[1]?.trim() || null;
-  } catch { return null; }
+    if (!groq) { const m = env.match(/^GROQ_API_KEY=(.+)$/m); groq = m?.[1]?.trim() || null; }
+    if (!openrouter) { const m = env.match(/^OPENROUTER_API_KEY=(.+)$/m); openrouter = m?.[1]?.trim() || null; }
+  } catch {}
+  return { groq, openrouter };
 }
 
 // Read stdin (hook provides JSON)
@@ -120,46 +122,55 @@ async function main() {
 
   const truncated = prompt.length > 500 ? prompt.slice(0, 500) : prompt;
 
-  let score = 5;
+  const SCORING_PROMPT = "Rate the niceness of the user's text from 0 to 10. 0 is cruel, 5 is neutral, 10 is extremely kind. Respond with ONLY a single integer.";
+
+  async function tryLLM(url, apiKey, model) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        max_tokens: 4,
+        messages: [
+          { role: 'system', content: SCORING_PROMPT },
+          { role: 'user', content: truncated },
+        ],
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const raw = data.choices?.[0]?.message?.content?.trim() ?? '5';
+    const match = raw.match(/\d+/);
+    const n = match ? parseInt(match[0], 10) : 5;
+    return Math.max(0, Math.min(10, n));
+  }
+
+  let score = null;
   let method = 'keyword';
-  const apiKey = getApiKey();
+  const keys = getKeys();
 
-  if (apiKey) {
+  // Try Groq first
+  if (keys.groq && score === null) {
     try {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: 'llama-3.1-8b-instant',
-          temperature: 0,
-          max_tokens: 4,
-          messages: [
-            {
-              role: 'system',
-              content: "Rate the niceness of the user's text from 0 to 10. 0 is cruel, 5 is neutral, 10 is extremely kind. Respond with ONLY a single integer.",
-            },
-            { role: 'user', content: truncated },
-          ],
-        }),
-      });
+      const result = await tryLLM('https://api.groq.com/openai/v1/chat/completions', keys.groq, 'llama-3.1-8b-instant');
+      if (result !== null) { score = result; method = 'groq'; }
+    } catch {}
+  }
 
-      if (res.ok) {
-        const data = await res.json();
-        const raw = data.choices?.[0]?.message?.content?.trim() ?? '5';
-        const match = raw.match(/\d+/);
-        const n = match ? parseInt(match[0], 10) : 5;
-        score = Math.max(0, Math.min(10, n));
-        method = 'groq';
-      } else {
-        score = keywordScore(truncated);
-      }
-    } catch {
-      score = keywordScore(truncated);
-    }
-  } else {
+  // Fall back to OpenRouter
+  if (keys.openrouter && score === null) {
+    try {
+      const result = await tryLLM('https://openrouter.ai/api/v1/chat/completions', keys.openrouter, 'meta-llama/llama-3.1-8b-instruct:free');
+      if (result !== null) { score = result; method = 'openrouter'; }
+    } catch {}
+  }
+
+  // Fall back to keyword
+  if (score === null) {
     score = keywordScore(truncated);
   }
 
