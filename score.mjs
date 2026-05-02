@@ -7,6 +7,28 @@ const STATE_FILE = join(DIR, 'state.json');
 const LOCK_FILE = join(DIR, 'state.lock');
 const ENV_FILE = join(DIR, '.env');
 
+// Offline keyword scorer — zero dependencies, instant fallback
+function keywordScore(text) {
+  const lower = text.toLowerCase();
+  const nice = ['thank', 'thanks', 'please', 'appreciate', 'love', 'great', 'awesome',
+    'amazing', 'helpful', 'kind', 'wonderful', 'excellent', 'fantastic', 'beautiful',
+    'brilliant', 'glad', 'happy', 'sorry', 'pardon', 'welcome', 'enjoy', 'perfect',
+    'good job', 'well done', 'nice work', 'you rock', 'grateful'];
+  const mean = ['stupid', 'idiot', 'dumb', 'hate', 'terrible', 'awful', 'worst',
+    'useless', 'trash', 'garbage', 'shut up', 'wrong', 'pathetic', 'incompetent',
+    'moron', 'fool', 'ugly', 'disgusting', 'horrible', 'suck', 'annoying', 'wtf',
+    'stfu', 'die', 'kill'];
+
+  let niceCount = 0;
+  let meanCount = 0;
+  for (const w of nice) if (lower.includes(w)) niceCount++;
+  for (const w of mean) if (lower.includes(w)) meanCount++;
+
+  if (niceCount === 0 && meanCount === 0) return 5;
+  const ratio = (niceCount - meanCount) / (niceCount + meanCount);
+  return Math.max(0, Math.min(10, Math.round(5 + ratio * 5)));
+}
+
 // Read API key from ~/.claude/irigotchi/.env
 function getApiKey() {
   if (process.env.GROQ_API_KEY) return process.env.GROQ_API_KEY;
@@ -81,7 +103,7 @@ function printStatus(state) {
   const info = [
     '',
     `  IRI [${bar}] ${avg.toFixed(1)}/10 (${mood})`,
-    `  last: ${state.lastScore} | trend: ${trend}`,
+    `  last: ${state.lastScore} | trend: ${trend} | via: ${state.method}`,
     '',
   ];
 
@@ -93,68 +115,52 @@ function printStatus(state) {
 }
 
 async function main() {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    console.log('IRI: No GROQ_API_KEY found. Add it to ~/.claude/irigotchi/.env');
-    process.exit(0);
-  }
-
   const prompt = readStdin();
   if (!prompt.trim()) process.exit(0);
 
   const truncated = prompt.length > 500 ? prompt.slice(0, 500) : prompt;
 
   let score = 5;
-  try {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'llama-3.1-8b-instant',
-        temperature: 0,
-        max_tokens: 4,
-        messages: [
-          {
-            role: 'system',
-            content: "Rate the niceness of the user's text from 0 to 10. 0 is cruel, 5 is neutral, 10 is extremely kind. Respond with ONLY a single integer.",
-          },
-          { role: 'user', content: truncated },
-        ],
-      }),
-    });
+  let method = 'keyword';
+  const apiKey = getApiKey();
 
-    if (!res.ok) {
-      console.log('IRI: Groq API error, using last known state');
-      if (existsSync(STATE_FILE)) {
-        try {
-          const state = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
-          state.prevAvg = null;
-          state.lastScore = '?';
-          printStatus(state);
-        } catch {}
+  if (apiKey) {
+    try {
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'llama-3.1-8b-instant',
+          temperature: 0,
+          max_tokens: 4,
+          messages: [
+            {
+              role: 'system',
+              content: "Rate the niceness of the user's text from 0 to 10. 0 is cruel, 5 is neutral, 10 is extremely kind. Respond with ONLY a single integer.",
+            },
+            { role: 'user', content: truncated },
+          ],
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const raw = data.choices?.[0]?.message?.content?.trim() ?? '5';
+        const match = raw.match(/\d+/);
+        const n = match ? parseInt(match[0], 10) : 5;
+        score = Math.max(0, Math.min(10, n));
+        method = 'groq';
+      } else {
+        score = keywordScore(truncated);
       }
-      process.exit(0);
+    } catch {
+      score = keywordScore(truncated);
     }
-
-    const data = await res.json();
-    const raw = data.choices?.[0]?.message?.content?.trim() ?? '5';
-    const match = raw.match(/\d+/);
-    const n = match ? parseInt(match[0], 10) : 5;
-    score = Math.max(0, Math.min(10, n));
-  } catch {
-    console.log('IRI: Network error, using last known state');
-    if (existsSync(STATE_FILE)) {
-      try {
-        const state = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
-        state.prevAvg = null;
-        state.lastScore = '?';
-        printStatus(state);
-      } catch {}
-    }
-    process.exit(0);
+  } else {
+    score = keywordScore(truncated);
   }
 
   if (!acquireLock()) {
@@ -174,6 +180,7 @@ async function main() {
     state.scores.push(score);
     if (state.scores.length > 10) state.scores = state.scores.slice(-10);
     state.lastScore = score;
+    state.method = method;
     state.prevAvg = prevAvg;
     state.lastUpdated = new Date().toISOString();
     writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
