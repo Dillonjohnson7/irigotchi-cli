@@ -124,7 +124,7 @@ async function main() {
 
   const SCORING_PROMPT = "Rate the niceness of the user's text from 0 to 10. 0 is cruel, 5 is neutral, 10 is extremely kind. Respond with ONLY a single integer.";
 
-  async function tryLLM(url, apiKey, model) {
+  async function tryLLM(url, apiKey, model, maxTokens = 4) {
     const res = await fetch(url, {
       method: 'POST',
       headers: {
@@ -134,7 +134,7 @@ async function main() {
       body: JSON.stringify({
         model,
         temperature: 0,
-        max_tokens: 4,
+        max_tokens: maxTokens,
         messages: [
           { role: 'system', content: SCORING_PROMPT },
           { role: 'user', content: truncated },
@@ -164,7 +164,7 @@ async function main() {
   // Fall back to OpenRouter
   if (keys.openrouter && score === null) {
     try {
-      const result = await tryLLM('https://openrouter.ai/api/v1/chat/completions', keys.openrouter, 'meta-llama/llama-3.1-8b-instruct:free');
+      const result = await tryLLM('https://openrouter.ai/api/v1/chat/completions', keys.openrouter, 'openai/gpt-oss-20b:free', 64);
       if (result !== null) { score = result; method = 'openrouter'; }
     } catch {}
   }
