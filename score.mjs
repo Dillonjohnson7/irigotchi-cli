@@ -77,15 +77,25 @@ function releaseLock() {
   try { unlinkSync(LOCK_FILE); } catch {}
 }
 
+// Non-linear mood curve: 4-7 barely moves IRI, 0-3 and 8-10 hit hard
+function moodWeight(score) {
+  const dist = (score - 5) / 5;
+  return 5 + Math.sign(dist) * Math.pow(Math.abs(dist), 2.5) * 5;
+}
+
+function moodAvg(scores) {
+  if (scores.length === 0) return 5;
+  return scores.reduce((sum, s) => sum + moodWeight(s), 0) / scores.length;
+}
+
 function printStatus(state) {
-  const avg = state.scores.length > 0
-    ? state.scores.reduce((a, b) => a + b, 0) / state.scores.length
-    : 5;
+  const avg = moodAvg(state.scores);
   const trend = state.prevAvg === null ? '\u2192' : avg > state.prevAvg + 0.3 ? '\u2191' : avg < state.prevAvg - 0.3 ? '\u2193' : '\u2192';
   const moods = [
     [8, 'happy'],
-    [6, 'good'],
-    [4, 'neutral'],
+    [6.5, 'good'],
+    [4.5, 'fine'],
+    [3.5, 'neutral'],
     [2, 'sick'],
     [0, 'dying'],
   ];
@@ -96,6 +106,7 @@ function printStatus(state) {
   const faceArt = {
     happy:   [`${L}           ${L}`, `${L}   ^   ^   ${L}`, `${L}  o  v  o  ${L}`, `${L}           ${L}`],
     good:    [`${L}           ${L}`, `${L}   o   o   ${L}`, `${L}     v     ${L}`, `${L}           ${L}`],
+    fine:    [`${L}           ${L}`, `${L}   .   .   ${L}`, `${L}     ᵕ     ${L}`, `${L}           ${L}`],
     neutral: [`${L}           ${L}`, `${L}   .   .   ${L}`, `${L}     -     ${L}`, `${L}           ${L}`],
     sick:    [`${L}           ${L}`, `${L}   ;   ;   ${L}`, `${L}     n     ${L}`, `${L}     .     ${L}`],
     dying:   [`${L}  ///////  ${L}`, `${L}   x   x   ${L}`, `${L}    ___    ${L}`, `${L}   ///     ${L}`],
@@ -127,6 +138,7 @@ async function main() {
   async function tryLLM(url, apiKey, model, maxTokens = 4) {
     const res = await fetch(url, {
       method: 'POST',
+      signal: AbortSignal.timeout(5000),
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
@@ -143,7 +155,8 @@ async function main() {
     });
     if (!res.ok) return null;
     const data = await res.json();
-    const raw = data.choices?.[0]?.message?.content?.trim() ?? '5';
+    let raw = data.choices?.[0]?.message?.content?.trim() ?? '5';
+    raw = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
     const match = raw.match(/\d+/);
     const n = match ? parseInt(match[0], 10) : 5;
     return Math.max(0, Math.min(10, n));
@@ -153,23 +166,30 @@ async function main() {
   let method = 'keyword';
   const keys = getKeys();
 
-  // Try Groq first
-  if (keys.groq && score === null) {
+  const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+  const OR_URL = 'https://openrouter.ai/api/v1/chat/completions';
+
+  const cascade = [
+    { url: GROQ_URL,  key: keys.groq,       model: 'qwen/qwen3.8-27b',                      label: 'groq-qwen3.8' },
+    { url: GROQ_URL,  key: keys.groq,       model: 'qwen/qwen3.6-27b',                      label: 'groq-qwen3.6' },
+    { url: GROQ_URL,  key: keys.groq,       model: 'openai/gpt-oss-20b',                    label: 'groq-gptoss20b' },
+    { url: GROQ_URL,  key: keys.groq,       model: 'openai/gpt-oss-120b',                   label: 'groq-gptoss120b' },
+    { url: GROQ_URL,  key: keys.groq,       model: 'allam-2-7b',                            label: 'groq-allam' },
+    { url: OR_URL,    key: keys.openrouter,  model: 'google/gemma-4-31b-it:free',     mt: 64, label: 'or-gemma31b' },
+    { url: OR_URL,    key: keys.openrouter,  model: 'nvidia/nemotron-3-super-120b-a12b:free', mt: 64, label: 'or-nemotron' },
+    { url: OR_URL,    key: keys.openrouter,  model: 'minimax/minimax-m3:free',        mt: 64, label: 'or-minimax' },
+    { url: OR_URL,    key: keys.openrouter,  model: 'z-ai/glm-5.2:free',             mt: 64, label: 'or-glm' },
+    { url: OR_URL,    key: keys.openrouter,  model: 'google/gemma-4-26b-a4b-it:free', mt: 64, label: 'or-gemma26b' },
+  ];
+
+  for (const c of cascade) {
+    if (!c.key) continue;
     try {
-      const result = await tryLLM('https://api.groq.com/openai/v1/chat/completions', keys.groq, 'llama-3.1-8b-instant');
-      if (result !== null) { score = result; method = 'groq'; }
+      const result = await tryLLM(c.url, c.key, c.model, c.mt || 4);
+      if (result !== null) { score = result; method = c.label; break; }
     } catch {}
   }
 
-  // Fall back to OpenRouter
-  if (keys.openrouter && score === null) {
-    try {
-      const result = await tryLLM('https://openrouter.ai/api/v1/chat/completions', keys.openrouter, 'openai/gpt-oss-20b:free', 64);
-      if (result !== null) { score = result; method = 'openrouter'; }
-    } catch {}
-  }
-
-  // Fall back to keyword
   if (score === null) {
     score = keywordScore(truncated);
   }
@@ -185,9 +205,7 @@ async function main() {
     }
     if (!Array.isArray(state.scores)) state.scores = [];
 
-    const prevAvg = state.scores.length > 0
-      ? state.scores.reduce((a, b) => a + b, 0) / state.scores.length
-      : null;
+    const prevAvg = state.scores.length > 0 ? moodAvg(state.scores) : null;
     state.scores.push(score);
     if (state.scores.length > 10) state.scores = state.scores.slice(-10);
     state.lastScore = score;

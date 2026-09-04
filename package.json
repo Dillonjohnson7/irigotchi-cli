@@ -1,0 +1,26 @@
+{
+  "name": "irigotchi",
+  "version": "1.0.0",
+  "description": "A Tamagotchi for your vibe with Claude Code",
+  "type": "module",
+  "bin": {
+    "irigotchi": "bin/install.mjs"
+  },
+  "files": [
+    "bin/install.mjs",
+    "score.mjs"
+  ],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "tamagotchi",
+    "vibe",
+    "hooks"
+  ],
+  "author": "Dillon Johnson",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Dillonjohnson7/irigotchi-cli"
+  }
+}

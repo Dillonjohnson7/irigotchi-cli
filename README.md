@@ -17,7 +17,7 @@ Be kind, IRI thrives. Be mean, IRI withers.
 
 Every time you send a message in Claude Code:
 
-1. A hook sends your prompt to [Groq](https://groq.com) (llama-3.1-8b-instant) which rates how nice it was from 0-10
+1. A hook sends your prompt through a 10-model cascade across [Groq](https://groq.com) and [OpenRouter](https://openrouter.ai) (all free tiers) which rates how nice it was from 0-10
 2. The score gets added to a rolling window of your last 10 messages
 3. IRI's mood updates based on your rolling average
 4. Claude displays IRI's face and stats at the top of every response
@@ -45,16 +45,8 @@ HAPPY (8-10)      GOOD (6-7)       NEUTRAL (4-5)    SICK (2-3)       DYING (0-1)
 ## Install
 
 ```bash
-git clone https://github.com/Dillonjohnson7/irigotchi-cli.git
-cd irigotchi-cli
-./install.sh
+curl -sL https://raw.githubusercontent.com/Dillonjohnson7/irigotchi-cli/main/install.sh | bash
 ```
-
-The installer will:
-- Copy the scoring script to `~/.claude/irigotchi/`
-- Prompt you for your Groq API key
-- Add the hook to `~/.claude/settings.json`
-- Add the display instruction to `~/.claude/CLAUDE.md`
 
 Start a new Claude Code session and IRI will appear.
 

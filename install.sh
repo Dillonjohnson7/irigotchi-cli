@@ -1,10 +1,10 @@
 #!/bin/bash
 set -e
 
+REPO="https://raw.githubusercontent.com/Dillonjohnson7/irigotchi-cli/main"
 INSTALL_DIR="$HOME/.claude/irigotchi"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 CLAUDE_MD="$HOME/.claude/CLAUDE.md"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo ""
 echo "  ╭───────────╮"
@@ -37,35 +37,40 @@ fi
 # Create install directory
 mkdir -p "$INSTALL_DIR"
 
-# Copy score script
-cp "$SCRIPT_DIR/score.mjs" "$INSTALL_DIR/score.mjs"
-echo "Copied score.mjs to $INSTALL_DIR"
+# Download score script
+if command -v curl &> /dev/null; then
+  curl -sL "$REPO/score.mjs" -o "$INSTALL_DIR/score.mjs"
+elif command -v wget &> /dev/null; then
+  wget -qO "$INSTALL_DIR/score.mjs" "$REPO/score.mjs"
+else
+  echo "Error: curl or wget required"
+  exit 1
+fi
+echo "Downloaded score.mjs"
 
 # Set up API key
 if [ -f "$INSTALL_DIR/.env" ] && grep -q "GROQ_API_KEY" "$INSTALL_DIR/.env"; then
   echo "Groq API key already configured"
 else
   echo ""
-  echo "You need a free Groq API key for IRI to work."
+  echo "IRI needs a free API key to score prompts with AI."
   echo "Get one at: https://console.groq.com/keys"
   echo ""
-  read -p "Paste your Groq API key (or press Enter to skip): " API_KEY
+  read -p "Paste your Groq API key (or Enter to skip): " API_KEY
   if [ -n "$API_KEY" ]; then
     echo "GROQ_API_KEY=$API_KEY" > "$INSTALL_DIR/.env"
     echo "API key saved"
   else
-    echo "Skipped. Add your key later to $INSTALL_DIR/.env"
-    echo "Format: GROQ_API_KEY=your_key_here"
+    echo "Skipped — IRI will use keyword scoring."
+    echo "Add a key later: echo GROQ_API_KEY=your_key >> $INSTALL_DIR/.env"
   fi
 fi
 
 # Add hook to settings.json
 if [ -f "$SETTINGS_FILE" ]; then
-  # Check if hook already exists
   if grep -q "irigotchi" "$SETTINGS_FILE"; then
-    echo "Hook already registered in settings.json"
+    echo "Hook already registered"
   else
-    # Merge hook into existing settings
     node -e "
       const fs = require('fs');
       const settings = JSON.parse(fs.readFileSync('$SETTINGS_FILE', 'utf-8'));
@@ -84,7 +89,6 @@ if [ -f "$SETTINGS_FILE" ]; then
     echo "Hook added to settings.json"
   fi
 else
-  # Create new settings file
   cat > "$SETTINGS_FILE" << 'SETTINGS'
 {
   "hooks": {
@@ -117,7 +121,7 @@ Every response MUST start with the IRI status from the UserPromptSubmit hook. Th
 
   if [ -f "$CLAUDE_MD" ]; then
     echo "$IRI_INSTRUCTION" >> "$CLAUDE_MD"
-    echo "Appended IRI instruction to existing CLAUDE.md"
+    echo "Appended IRI instruction to CLAUDE.md"
   else
     echo "# Global Instructions" > "$CLAUDE_MD"
     echo "$IRI_INSTRUCTION" >> "$CLAUDE_MD"
