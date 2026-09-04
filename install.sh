@@ -51,7 +51,7 @@ echo "Downloaded score.mjs"
 # Set up API key
 if [ -f "$INSTALL_DIR/.env" ] && grep -q "GROQ_API_KEY" "$INSTALL_DIR/.env"; then
   echo "Groq API key already configured"
-else
+elif [ -t 0 ]; then
   echo ""
   echo "IRI needs a free API key to score prompts with AI."
   echo "Get one at: https://console.groq.com/keys"
@@ -64,6 +64,9 @@ else
     echo "Skipped — IRI will use keyword scoring."
     echo "Add a key later: echo GROQ_API_KEY=your_key >> $INSTALL_DIR/.env"
   fi
+else
+  echo "No API key configured — IRI will use keyword scoring."
+  echo "Add a key later: echo GROQ_API_KEY=your_key >> $INSTALL_DIR/.env"
 fi
 
 # Add hook to settings.json
